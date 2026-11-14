@@ -1,0 +1,15 @@
+# Telegram Bot Framework (with JobQueue for scheduled daily briefings)
+python-telegram-bot[job-queue]>=21.0
+
+# Google Gmail API & OAuth2
+google-api-python-client>=2.120.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
+# Groq High-Speed LLM Inference API
+groq>=0.11.0
+
+# Data parsing & utilities
+pydantic>=2.7.0
+python-dotenv>=1.0.1
+beautifulsoup4>=4.12.3
