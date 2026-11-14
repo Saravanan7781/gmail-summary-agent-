@@ -1,8 +1,12 @@
 """Configuration manager for Gmail Summary Agent."""
 
+import json
+import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Base directory of the project
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -36,9 +40,6 @@ class Config:
     )
 
     # Required Gmail API scopes
-    # https://www.googleapis.com/auth/gmail.readonly: Read emails
-    # https://www.googleapis.com/auth/gmail.modify: Mark as read / archive
-    # https://www.googleapis.com/auth/gmail.compose: Create drafts
     GMAIL_SCOPES: list[str] = [
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.modify",
@@ -56,17 +57,65 @@ class Config:
     )
 
     @classmethod
+    def _write_clean_json(cls, raw_content: str, destination: Path) -> bool:
+        """Safely parse and re-format JSON, handling quotes, control chars, or base64."""
+        import base64
+
+        content = raw_content.strip()
+        if not content:
+            return False
+
+        # Attempt base64 decode if not plain JSON
+        if not content.startswith("{"):
+            try:
+                decoded = base64.b64decode(content).decode("utf-8")
+                if decoded.strip().startswith("{"):
+                    content = decoded.strip()
+            except Exception:
+                pass
+
+        # Strip wrapping quotes if added by shell or env parser
+        if (content.startswith('"') and content.endswith('"')) or (
+            content.startswith("'") and content.endswith("'")
+        ):
+            content = content[1:-1].strip()
+
+        # Parse with strict=False to forgive unescaped newlines/tabs
+        parsed = None
+        try:
+            parsed = json.loads(content, strict=False)
+        except Exception:
+            try:
+                unescaped = content.encode("utf-8").decode("unicode_escape")
+                parsed = json.loads(unescaped, strict=False)
+            except Exception as e:
+                logger.warning("Could not parse JSON for %s: %s", destination.name, e)
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if parsed is not None:
+            with open(destination, "w", encoding="utf-8") as f:
+                json.dump(parsed, f, indent=2)
+            return True
+        else:
+            destination.write_text(content, encoding="utf-8")
+            return True
+
+    @classmethod
     def initialize_credentials(cls) -> None:
         """Restore credentials from environment variables if running in the cloud (e.g. Render)."""
-        creds_json = os.getenv("GMAIL_CREDENTIALS_JSON", "").strip()
-        if creds_json and not cls.GMAIL_CREDENTIALS_PATH.exists():
-            cls.GMAIL_CREDENTIALS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            cls.GMAIL_CREDENTIALS_PATH.write_text(creds_json, encoding="utf-8")
+        creds_json = (
+            os.getenv("GMAIL_CREDENTIALS_JSON", "").strip()
+            or os.getenv("GMAIL_CREDENTIALS_BASE64", "").strip()
+        )
+        if creds_json:
+            cls._write_clean_json(creds_json, cls.GMAIL_CREDENTIALS_PATH)
 
-        token_json = os.getenv("GMAIL_TOKEN_JSON", "").strip()
-        if token_json and not cls.GMAIL_TOKEN_PATH.exists():
-            cls.GMAIL_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-            cls.GMAIL_TOKEN_PATH.write_text(token_json, encoding="utf-8")
+        token_json = (
+            os.getenv("GMAIL_TOKEN_JSON", "").strip()
+            or os.getenv("GMAIL_TOKEN_BASE64", "").strip()
+        )
+        if token_json:
+            cls._write_clean_json(token_json, cls.GMAIL_TOKEN_PATH)
 
     @classmethod
     def validate(cls) -> list[str]:

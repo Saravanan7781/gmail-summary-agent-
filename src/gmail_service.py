@@ -1,6 +1,7 @@
 """Gmail API integration service for authentication, fetching, searching, and managing emails."""
 
 import base64
+import json
 import logging
 from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
@@ -30,8 +31,10 @@ class GmailService:
         # Load existing user token if available
         if Config.GMAIL_TOKEN_PATH.exists():
             try:
-                creds = Credentials.from_authorized_user_file(
-                    str(Config.GMAIL_TOKEN_PATH), Config.GMAIL_SCOPES
+                raw_token_text = Config.GMAIL_TOKEN_PATH.read_text(encoding="utf-8")
+                token_data = json.loads(raw_token_text, strict=False)
+                creds = Credentials.from_authorized_user_info(
+                    token_data, Config.GMAIL_SCOPES
                 )
             except Exception as e:
                 logger.warning("Failed to load existing token.json: %s", e)
@@ -45,15 +48,17 @@ class GmailService:
                 if not Config.GMAIL_CREDENTIALS_PATH.exists():
                     raise FileNotFoundError(
                         f"Missing Gmail client secrets credentials file at: {Config.GMAIL_CREDENTIALS_PATH}. "
-                        "Please download credentials.json from Google Cloud Console."
+                        "Please provide credentials.json or set GMAIL_CREDENTIALS_JSON."
                     )
                 logger.info("Initiating browser OAuth flow for Gmail...")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(Config.GMAIL_CREDENTIALS_PATH), Config.GMAIL_SCOPES
+                raw_client_text = Config.GMAIL_CREDENTIALS_PATH.read_text(encoding="utf-8")
+                client_data = json.loads(raw_client_text, strict=False)
+                flow = InstalledAppFlow.from_client_config(
+                    client_data, Config.GMAIL_SCOPES
                 )
                 creds = flow.run_local_server(port=0)
 
-            # Save credentials for the next run
+            # Save credentials for next run
             Config.GMAIL_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
             with open(Config.GMAIL_TOKEN_PATH, "w", encoding="utf-8") as token_file:
                 token_file.write(creds.to_json())
@@ -116,7 +121,6 @@ class GmailService:
         date_str = header_dict.get("date", "")
         message_id_header = header_dict.get("message-id", "")
 
-        # Extract plain text or HTML body
         body_text = self._extract_body(payload)
         snippet = msg.get("snippet", "")
 
@@ -128,7 +132,7 @@ class GmailService:
             "date": date_str,
             "message_id_header": message_id_header,
             "snippet": snippet,
-            "body": body_text[:4000] if body_text else snippet,  # Cap text to 4k characters
+            "body": body_text[:4000] if body_text else snippet,
             "labels": msg.get("labelIds", []),
         }
 
@@ -144,7 +148,6 @@ class GmailService:
                 return soup.get_text(separator=" ", strip=True)
             return decoded.strip()
 
-        # Handle multipart payloads
         parts = payload.get("parts", [])
         plain_texts = []
         html_texts = []
@@ -160,7 +163,6 @@ class GmailService:
                     soup = BeautifulSoup(decoded, "html.parser")
                     html_texts.append(soup.get_text(separator=" ", strip=True))
             elif "parts" in part:
-                # Nested multipart
                 nested_text = self._extract_body(part)
                 if nested_text:
                     plain_texts.append(nested_text)

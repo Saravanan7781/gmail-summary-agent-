@@ -105,8 +105,17 @@ class GroqService:
                 response_format={"type": "json_object"},
             )
 
-            raw_text = completion.choices[0].message.content or "{}"
-            data = json.loads(raw_text)
+            raw_text = (completion.choices[0].message.content or "{}").strip()
+            # Strip markdown code fences if returned by model
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            elif raw_text.startswith("```"):
+                raw_text = raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+            raw_text = raw_text.strip()
+
+            data = json.loads(raw_text, strict=False)
             return InboxDigest(**data)
         except Exception as e:
             logger.error("Failed to generate structured digest from Groq: %s", e)
@@ -201,7 +210,16 @@ class GroqService:
             response_format={"type": "json_object"},
         )
 
-        data = json.loads(completion.choices[0].message.content or "{}")
+        raw_draft = (completion.choices[0].message.content or "{}").strip()
+        if raw_draft.startswith("```json"):
+            raw_draft = raw_draft[7:]
+        elif raw_draft.startswith("```"):
+            raw_draft = raw_draft[3:]
+        if raw_draft.endswith("```"):
+            raw_draft = raw_draft[:-3]
+        raw_draft = raw_draft.strip()
+
+        data = json.loads(raw_draft, strict=False)
         return {
             "subject": data.get("subject", f"Re: {email.get('subject')}"),
             "body": data.get("body", ""),
