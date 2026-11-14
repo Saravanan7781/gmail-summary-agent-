@@ -74,19 +74,19 @@ class GroqService:
             )
 
         system_prompt = (
-            "You are an executive AI assistant managing an inbox for a busy professional. "
-            "Analyze the unread emails provided. You must output ONLY valid JSON adhering strictly to this schema:\n"
+            "You are an executive Chief of Staff analyzing incoming emails for a busy professional. "
+            "Your output must be strictly valid JSON according to this schema:\n"
             "{\n"
-            '  "executive_summary": "2-3 sentence overview of the current inbox status",\n'
+            '  "executive_summary": "Crisp 2-sentence conversational synthesis of the inbox situation right now",\n'
             '  "items": [\n'
             "    {\n"
             '      "id": "exact Gmail message ID",\n'
-            '      "sender": "sender name or address",\n'
+            '      "sender": "Human sender name (e.g. John Doe, PepsiCo, GitHub)",\n'
             '      "subject": "email subject",\n'
             '      "priority": "URGENT | IMPORTANT | NORMAL | LOW",\n'
-            '      "category": "e.g. Action Required, Work, Finance, Newsletter, Notification",\n'
-            '      "tl_dr": "1-2 sentence executive summary of the content",\n'
-            '      "action_items": ["list of specific tasks or deadlines if any"]\n'
+            '      "category": "Action Required | Work | Finance | Newsletter | Notification",\n'
+            '      "tl_dr": "Strictly 1 punchy, high-signal sentence summarizing what this email is and why it matters",\n'
+            '      "action_items": ["list of explicit deadlines or action items required from the user, if any"]\n'
             "    }\n"
             "  ]\n"
             "}"
@@ -157,10 +157,13 @@ class GroqService:
 
         prompt = (
             f"User Question: \"{user_question}\"\n\n"
-            f"Here are the relevant emails retrieved from Gmail:\n\n"
+            f"Relevant Emails from Gmail:\n\n"
             f"{''.join(emails_context)}\n\n"
-            "Answer the user's question accurately, concisely, and cite the relevant sender, date, or subject. "
-            "If the information is not present in the provided emails, state that clearly."
+            "Instructions:\n"
+            "1. Answer the question conversationally, clearly, and concisely (2 to 4 sentences or bullet points).\n"
+            "2. Reference the sender, date, or specific details if relevant.\n"
+            "3. If the emails do not contain the answer, state that clearly without guessing.\n"
+            "4. Keep the tone sharp, professional, and friendly. Avoid technical jargon or raw JSON."
         )
 
         completion = client.chat.completions.create(
