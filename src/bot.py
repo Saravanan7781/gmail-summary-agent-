@@ -1,4 +1,4 @@
-"""Modern, elegant Telegram Bot UX with Proactive VIP Radar support."""
+"""Modern, elegant Telegram Bot UX with Context Memory and Smart Intent Handling."""
 
 import html
 import logging
@@ -67,7 +67,7 @@ async def check_auth_or_reject(update: Update) -> bool:
 
 
 def clean_sender_name(raw_sender: str) -> str:
-    """Extract human-readable sender name."""
+    """Extract clean sender name."""
     if "<" in raw_sender:
         name_part = raw_sender.split("<")[0].strip().strip('"').strip("'")
         if name_part:
@@ -76,7 +76,7 @@ def clean_sender_name(raw_sender: str) -> str:
 
 
 class GmailBot:
-    """Telegram Bot Controller with modern executive UI and VIP Radar."""
+    """Telegram Bot Controller with modern executive UI, context memory, and smart intent handling."""
 
     def __init__(self, gmail_svc: GmailService, groq_svc: GroqService):
         self.gmail = gmail_svc
@@ -94,7 +94,7 @@ class GmailBot:
             f"<b>Core Capabilities:</b>\n"
             f"• 🚨 <b>Proactive VIP Radar</b>: Automatically monitoring for critical alerts and VIP senders every 5 min.\n"
             f"• 📊 <b>Executive Summary</b>: Consolidated inbox pulse without notification spam.\n"
-            f"• ✍️ <b>One-Click AI Drafts</b>: Contextual replies saved to your Gmail Drafts.\n"
+            f"• ✍️ <b>Natural AI Replies</b>: Ask me to draft replies directly in chat (*'Draft a reply to Saravanan saying...'*)!\n"
             f"• 💬 <b>Natural Chat</b>: Ask me any question about your emails.\n\n"
             f"<i>Tap any button below or ask a question directly!</i>"
         )
@@ -105,13 +105,14 @@ class GmailBot:
         if not await check_auth_or_reject(update):
             return
 
-        vip_count = len(vip_manager.get_watchlist())
+        watchlist = vip_manager.get_watchlist()
+        vip_count = len(watchlist)
         status_text = (
             f"⚙️ <b>Assistant Health & Status</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>AI Inference:</b> Groq ({html.escape(Config.GROQ_MODEL)})\n"
             f"• <b>Gmail OAuth:</b> {'✅ Connected' if Config.GMAIL_TOKEN_PATH.exists() else '❌ Not Authenticated'}\n"
-            f"• <b>VIP Radar:</b> ✅ Active (Monitoring every 5 min | {vip_count} watched)\n"
+            f"• <b>VIP Radar:</b> ✅ Active (Scanning every 5 min | {vip_count} watched)\n"
             f"• <b>Morning Briefing:</b> {'✅ Active (' + Config.DAILY_DIGEST_TIME + ')' if Config.ENABLE_SCHEDULED_DIGEST else '⏸️ Inactive'}\n"
             f"• <b>Authorized User:</b> <code>{update.effective_user.id}</code>"
         )
@@ -122,7 +123,6 @@ class GmailBot:
         if not await check_auth_or_reject(update):
             return
 
-        # Handle subcommands: /vip add <x>, /vip remove <x>
         if context.args:
             sub = context.args[0].lower()
             if sub == "add" and len(context.args) > 1:
@@ -132,7 +132,7 @@ class GmailBot:
                 else:
                     await update.message.reply_html(f"ℹ️ <code>{html.escape(target)}</code> is already on your VIP list.")
                 return
-            elif (sub == "remove" or sub == "del") and len(context.args) > 1:
+            elif (sub in ("remove", "del")) and len(context.args) > 1:
                 target = " ".join(context.args[1:]).strip()
                 if vip_manager.remove_vip(target):
                     await update.message.reply_html(f"🗑️ <b>Removed from VIP Watchlist:</b> <code>{html.escape(target)}</code>")
@@ -140,25 +140,24 @@ class GmailBot:
                     await update.message.reply_html(f"ℹ️ Could not find <code>{html.escape(target)}</code> on your list.")
                 return
 
-        # Show VIP Dashboard
         watchlist = vip_manager.get_watchlist()
         if watchlist:
             items_list = "\n".join([f"  • <code>{html.escape(v)}</code>" for v in watchlist])
         else:
-            items_list = "  <i>No custom senders yet. (Groq still autonomously alerts on security codes & urgent deadlines!)</i>"
+            items_list = "  <i>No custom senders yet. (Groq still autonomously alerts on payments, security codes & deadlines!)</i>"
 
         text = (
             f"🚨 <b>VIP Radar & Proactive Alerts</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Your agent silently scans your inbox every 5 minutes and pushes instant alerts for:\n"
-            f"1. <b>Strict Urgency</b> (Security verification codes, 2FA, payment issues, same-day deadlines).\n"
+            f"1. <b>Strict Urgency</b> (Money transfers, 2FA/security codes, payment confirmations, same-day deadlines).\n"
             f"2. <b>VIP Senders & Domains</b> matching your watchlist below.\n\n"
             f"<b>Current Watchlist ({len(watchlist)}):</b>\n"
             f"{items_list}\n\n"
             f"<b>How to Add / Remove:</b>\n"
+            f"• <code>/vip add saravanan</code>\n"
             f"• <code>/vip add boss@company.com</code>\n"
-            f"• <code>/vip add Google</code>\n"
-            f"• <code>/vip remove Google</code>"
+            f"• <code>/vip remove saravanan</code>"
         )
 
         keyboard = [
@@ -189,6 +188,12 @@ class GmailBot:
             context.user_data["cached_items"] = {
                 item.id: item for item in digest.items
             }
+            context.user_data["cached_emails"] = {
+                em["id"]: em for em in unread_emails
+            }
+            # Set the first urgent or first email as default last active
+            if unread_emails:
+                context.user_data["last_active_email"] = unread_emails[0]
 
             urgent = [i for i in digest.items if i.priority.upper() == "URGENT"]
             important = [i for i in digest.items if i.priority.upper() == "IMPORTANT"]
@@ -271,6 +276,10 @@ class GmailBot:
                 await update.message.reply_html("🎉 <b>All caught up!</b> No unread emails.", reply_markup=MAIN_KEYBOARD)
                 return
 
+            context.user_data["cached_emails"] = {em["id"]: em for em in emails}
+            if emails:
+                context.user_data["last_active_email"] = emails[0]
+
             lines = [f"📬 <b>Recent Unread Emails ({len(emails)}):</b>\n"]
             for i, em in enumerate(emails, 1):
                 sender = clean_sender_name(em.get("from", "Unknown"))
@@ -289,14 +298,67 @@ class GmailBot:
             logger.exception("Error in /unread: %s", e)
             await update.message.reply_html(f"❌ Error: <code>{html.escape(str(e))}</code>")
 
+    def _find_target_email_for_draft(self, text: str, context: ContextTypes.DEFAULT_TYPE) -> tuple[Optional[Dict[str, Any]], str]:
+        """Intelligently locate the email the user wants to reply to and extract custom instructions."""
+        lower_text = text.lower()
+        last_active = context.user_data.get("last_active_email")
+
+        # Extract instructions (everything after 'like', 'saying', 'that', 'with', 'telling')
+        instruction = text
+        for marker in ("like ", "saying ", "that ", "with ", "telling "):
+            if marker in lower_text:
+                parts = re.split(marker, text, flags=re.IGNORECASE, maxsplit=1)
+                if len(parts) > 1 and parts[1].strip():
+                    instruction = parts[1].strip()
+                break
+
+        # Check if text mentions a person's name or keywords
+        potential_names = []
+        for word in lower_text.replace(",", " ").split():
+            if word not in (
+                "draft", "a", "reply", "to", "email", "mail", "like", "saying",
+                "i", "ive", "i've", "have", "received", "formally", "please",
+                "the", "and", "previously", "marked", "it", "as", "read", "him", "her", "them"
+            ) and len(word) > 2:
+                potential_names.append(word)
+
+        # 1. Check if last_active_email matches any extracted name
+        if last_active:
+            last_from = (last_active.get("from", "")).lower()
+            last_subj = (last_active.get("subject", "")).lower()
+            if not potential_names or any(name in last_from or name in last_subj for name in potential_names):
+                return last_active, instruction
+
+        # 2. Search recent emails (both read and unread from the past 4 days)
+        for name in potential_names:
+            matches = self.gmail.get_recent_emails(max_results=5, query=name)
+            if matches:
+                context.user_data["last_active_email"] = matches[0]
+                return matches[0], instruction
+
+        # 3. Fallback to general search
+        if potential_names:
+            search_query = " ".join(potential_names[:2])
+            matches = self.gmail.search_emails(query=search_query, max_results=3)
+            if matches:
+                context.user_data["last_active_email"] = matches[0]
+                return matches[0], instruction
+
+        # 4. Fallback to last_active_email if available
+        if last_active:
+            return last_active, instruction
+
+        return None, instruction
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle regular text messages and bottom menu button taps."""
+        """Handle regular text messages, bottom menu taps, and smart drafting requests."""
         if not await check_auth_or_reject(update):
             return
 
         text = update.message.text.strip()
+        lower_text = text.lower()
 
-        # Route bottom keyboard buttons
+        # 1. Route bottom keyboard buttons
         if text == "📊 Executive Summary":
             await self.summary_command(update, context)
             return
@@ -310,17 +372,87 @@ class GmailBot:
             await self.status_command(update, context)
             return
 
-        # Natural language inquiry about inbox
+        # 2. Check if user is asking to draft a reply
+        draft_triggers = ("draft a reply", "draft reply", "reply to", "write a reply", "respond to")
+        is_draft_request = any(trig in lower_text for trig in draft_triggers)
+
+        if is_draft_request:
+            await update.message.reply_chat_action(ChatAction.TYPING)
+            progress_msg = await update.message.reply_html("✍️ <i>Finding target email and composing draft with Groq...</i>")
+
+            target_email, instructions = self._find_target_email_for_draft(text, context)
+
+            if not target_email:
+                await progress_msg.edit_text(
+                    "🤔 <i>I couldn't locate the specific email to reply to.</i>\n\n"
+                    "Try specifying the sender's name or subject (e.g. <code>Draft a reply to Saravanan saying...</code>), "
+                    "or tap <b>[✍️ Draft AI Reply]</b> directly on any email card!",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
+            draft_content = self.groq.draft_reply(target_email, user_instructions=instructions)
+            draft_id = self.gmail.create_draft(
+                to=target_email.get("from", ""),
+                subject=draft_content.get("subject", ""),
+                body_text=draft_content.get("body", ""),
+                in_reply_to=target_email.get("message_id_header"),
+                thread_id=target_email.get("thread_id"),
+            )
+
+            if draft_id:
+                sender_display = clean_sender_name(target_email.get("from", ""))
+                reply_card = (
+                    f"✍️ <b>Draft Created in Gmail!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<b>In Reply To:</b> {html.escape(sender_display)} (<code>{html.escape(target_email.get('subject', ''))}</code>)\n"
+                    f"<b>Subject:</b> <code>{html.escape(draft_content.get('subject', ''))}</code>\n\n"
+                    f"<b>Draft Content:</b>\n"
+                    f"<blockquote>{html.escape(draft_content.get('body', ''))}</blockquote>\n\n"
+                    f"💾 <i>Saved to your Gmail Drafts folder. You can review and send it anytime!</i>"
+                )
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✅ Mark as Read", callback_data=f"read:{target_email.get('id')}"),
+                        InlineKeyboardButton("📄 View Email Content", callback_data=f"view:{target_email.get('id')}"),
+                    ]
+                ]
+                await progress_msg.edit_text(reply_card, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+            else:
+                await progress_msg.edit_text("❌ Failed to save draft to Gmail.")
+            return
+
+        # 3. Natural language inquiry about inbox
         question = text.removeprefix("/ask").strip()
         await update.message.reply_chat_action(ChatAction.TYPING)
         status_msg = await update.message.reply_html("🔍 <i>Searching your inbox & consulting Groq...</i>")
 
         try:
-            relevant_emails = self.gmail.search_emails(query=question, max_results=6)
-            if not relevant_emails:
-                relevant_emails = self.gmail.fetch_unread_emails(max_results=6)
+            # Smart context collection:
+            # 1. Fetch recent emails (both read & unread from past 4 days)
+            recent_inbox = self.gmail.get_recent_emails(max_results=8)
 
-            answer = self.groq.answer_query_about_emails(user_question=question, emails=relevant_emails)
+            # 2. Extract potential keywords from user question to perform targeted search
+            search_keywords = [
+                w for w in question.lower().replace("?", "").replace(",", "").split()
+                if w not in ("show", "me", "important", "mails", "mail", "emails", "the", "first", "1st", "you", "think", "is", "it", "are", "from", "any", "what", "did", "get")
+                and len(w) > 2
+            ]
+
+            targeted_emails = []
+            if search_keywords:
+                search_term = " ".join(search_keywords[:2])
+                targeted_emails = self.gmail.search_emails(query=search_term, max_results=5)
+
+            # Combine and deduplicate emails
+            combined_emails = []
+            seen_ids = set()
+            for em in (targeted_emails + recent_inbox):
+                if em.get("id") and em["id"] not in seen_ids:
+                    seen_ids.add(em["id"])
+                    combined_emails.append(em)
+
+            answer = self.groq.answer_query_about_emails(user_question=question, emails=combined_emails[:8])
             response_text = (
                 f"💡 <b>Inbox Intelligence</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -347,23 +479,37 @@ class GmailBot:
         elif data == "radar_scan_now":
             await query.message.reply_chat_action(ChatAction.TYPING)
             progress = await query.message.reply_html("⚡ <i>Scanning inbox with VIP Radar...</i>")
-            unread = self.gmail.fetch_unread_emails(max_results=6)
+            # Fetch unread emails
+            unread = self.gmail.fetch_unread_emails(max_results=8)
             found_alerts = 0
             for em in unread:
                 vip_m = vip_manager.matches_vip(em.get("from", ""), em.get("subject", ""))
                 eval_res = self.groq.evaluate_email_urgency(em, vip_match=vip_m)
                 if eval_res and eval_res.is_urgent:
                     found_alerts += 1
+                    # Save into context memory!
+                    context.user_data["last_active_email"] = em
                     clean_name = clean_sender_name(em.get("from", ""))
                     alert_card = (
                         f"🚨 <b>VIP RADAR: Live Alert</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"<b>From:</b> {html.escape(clean_name)}\n"
                         f"<b>Subject:</b> <code>{html.escape(em.get('subject', ''))}</code>\n"
-                        f"<b>Reason:</b> {html.escape(eval_res.reason)}\n\n"
-                        f"<b>Takeaway:</b> {html.escape(eval_res.tl_dr)}"
+                        f"<b>Trigger:</b> <i>{html.escape(eval_res.reason)}</i>\n\n"
+                        f"<b>Takeaway:</b>\n{html.escape(eval_res.tl_dr)}\n"
                     )
+                    if eval_res.action_required:
+                        alert_card += f"\n<b>⚡ Action:</b> <i>{html.escape(eval_res.action_required)}</i>\n"
+
                     keyboard = [
-                        [InlineKeyboardButton("✍️ Draft Reply", callback_data=f"draft:{em.get('id')}")]
+                        [
+                            InlineKeyboardButton("✍️ Draft Reply", callback_data=f"draft:{em.get('id')}"),
+                            InlineKeyboardButton("✅ Mark Read", callback_data=f"read:{em.get('id')}"),
+                        ],
+                        [
+                            InlineKeyboardButton("⭐ Add to VIP", callback_data=f"add_vip_sender:{em.get('id')}"),
+                            InlineKeyboardButton("📄 View Content", callback_data=f"view:{em.get('id')}"),
+                        ]
                     ]
                     await query.message.reply_html(alert_card, reply_markup=InlineKeyboardMarkup(keyboard))
             if found_alerts == 0:
@@ -380,6 +526,9 @@ class GmailBot:
             if not email:
                 await query.message.reply_html("❌ Could not load email details.")
                 return
+
+            # Store in context memory
+            context.user_data["last_active_email"] = email
 
             sender = email.get("from", "Unknown")
             subject = email.get("subject", "(No Subject)")
@@ -425,9 +574,16 @@ class GmailBot:
 
         elif data.startswith("read:"):
             msg_id = data.split("read:")[1]
+            email = self.gmail.get_email_details(msg_id)
+            if email:
+                context.user_data["last_active_email"] = email
+
             success = self.gmail.mark_as_read(msg_id)
             if success:
-                await query.message.reply_html(f"✅ <b>Marked as read in Gmail!</b>")
+                keyboard = [
+                    [InlineKeyboardButton("✍️ Draft Reply to This", callback_data=f"draft:{msg_id}")]
+                ]
+                await query.message.reply_html(f"✅ <b>Marked as read in Gmail!</b>", reply_markup=InlineKeyboardMarkup(keyboard))
             else:
                 await query.message.reply_html("❌ Failed to mark email as read.")
 
@@ -441,6 +597,7 @@ class GmailBot:
                 await progress_msg.edit_text("❌ Could not retrieve email details.")
                 return
 
+            context.user_data["last_active_email"] = email
             draft_content = self.groq.draft_reply(email)
             draft_id = self.gmail.create_draft(
                 to=email.get("from", ""),
@@ -468,13 +625,17 @@ class GmailBot:
             msg_id = data.split("view:")[1]
             email = self.gmail.get_email_details(msg_id)
             if email:
+                context.user_data["last_active_email"] = email
                 body = email.get("body", "") or email.get("snippet", "")
                 preview = (
                     f"📄 <b>Full Content:</b> {html.escape(email.get('subject', ''))}\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"{html.escape(body[:1500])}"
                 )
-                await query.message.reply_html(preview)
+                keyboard = [
+                    [InlineKeyboardButton("✍️ Draft Reply", callback_data=f"draft:{msg_id}")]
+                ]
+                await query.message.reply_html(preview, reply_markup=InlineKeyboardMarkup(keyboard))
             else:
                 await query.message.reply_html("❌ Could not load email details.")
 

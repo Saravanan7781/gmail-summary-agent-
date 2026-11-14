@@ -86,6 +86,25 @@ class GmailService:
                 email_list.append(details)
         return email_list
 
+    def get_recent_emails(self, max_results: int = 12, query: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch recent emails from the inbox (both read and unread from the past few days)."""
+        service = self.get_service()
+        search_query = "newer_than:4d"
+        if query:
+            search_query = f"{query} {search_query}"
+
+        results = service.users().messages().list(
+            userId="me", q=search_query, maxResults=max_results
+        ).execute()
+
+        messages = results.get("messages", [])
+        email_list = []
+        for msg in messages:
+            details = self.get_email_details(msg["id"])
+            if details:
+                email_list.append(details)
+        return email_list
+
     def search_emails(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         """Search emails using arbitrary Gmail search syntax (e.g. 'from:google', 'receipts')."""
         service = self.get_service()

@@ -40,11 +40,11 @@ class InboxDigest(BaseModel):
 class EmailUrgencyEvaluation(BaseModel):
     is_urgent: bool = Field(
         default=False,
-        description="True ONLY if this email requires immediate prompt attention (security codes/2FA, payment failure, strict deadlines within 24h, cancellations, or VIP requests)",
+        description="True ONLY if this email requires prompt user attention (financial deposits/credits, money sent, verification codes/2FA, payment issues, deadlines, or VIP requests)",
     )
     reason: str = Field(
         default="General Notification",
-        description="Short category tag e.g. 'Security Verification', 'Payment Failure', 'Urgent Deadline', 'VIP Sender'",
+        description="Short category tag e.g. 'Money Transfer', 'Payment Confirmation', 'Security Code', 'Urgent Deadline', 'VIP Message'",
     )
     tl_dr: str = Field(
         default="",
@@ -89,7 +89,7 @@ class GroqService:
                 f"From: {email.get('from')}\n"
                 f"Date: {email.get('date')}\n"
                 f"Subject: {email.get('subject')}\n"
-                f"Content:\n{snippet_body[:1500]}\n"
+                f"Content:\n{snippet_body[:1000]}\n"
             )
 
         system_prompt = (
@@ -122,6 +122,7 @@ class GroqService:
                 ],
                 temperature=0.2,
                 response_format={"type": "json_object"},
+                max_tokens=700,
             )
 
             raw_text = (completion.choices[0].message.content or "{}").strip()
@@ -147,13 +148,17 @@ class GroqService:
         vip_context = f"NOTE: This sender or subject matched the user's VIP Watchlist keyword: '{vip_match}'." if vip_match else ""
 
         system_prompt = (
-            "You are an executive Chief of Staff deciding whether an incoming email warrants sending an IMMEDIATE push notification. "
-            "Emails that warrant immediate alerts: security verification / 2FA codes, account lockouts, payment failures, strict same-day deadlines, emergencies, travel cancellations/flight delays, or VIP sender inquiries. "
-            "Emails that DO NOT warrant alerts: marketing promos, routine digests, social media updates, or newsletters. "
+            "You are an executive Chief of Staff deciding whether an incoming email warrants sending an IMMEDIATE push notification.\n"
+            "Items that warrant immediate alerts:\n"
+            "- Financial transactions: money transfers, deposits, credits (e.g. 1000rs credited), payments received, bank alerts, or fraud warnings.\n"
+            "- Direct personal requests: someone asking for confirmation, asking if money arrived, or urgent peer requests.\n"
+            "- Security verification / 2FA codes, account lockouts, or password resets.\n"
+            "- Strict same-day deadlines, emergencies, or VIP sender inquiries.\n"
+            "Items that DO NOT warrant alerts: marketing promos, routine digests, social media updates, or newsletters.\n"
             "Return JSON matching the schema:\n"
             "{\n"
             '  "is_urgent": true or false,\n'
-            '  "reason": "Security Alert | Payment Failure | Urgent Deadline | VIP Inquiry | General",\n'
+            '  "reason": "Money Transfer | Payment Confirmation | Security Alert | Urgent Deadline | VIP Inquiry | General",\n'
             '  "tl_dr": "1 punchy sentence explaining the email",\n'
             '  "action_required": "Exact action the user must take, if any"\n'
             "}"
@@ -176,6 +181,7 @@ class GroqService:
                 ],
                 temperature=0.1,
                 response_format={"type": "json_object"},
+                max_tokens=400,
             )
             raw = (completion.choices[0].message.content or "{}").strip()
             if raw.startswith("```json"):
@@ -189,7 +195,6 @@ class GroqService:
             data = json.loads(raw, strict=False)
             eval_res = EmailUrgencyEvaluation(**data)
 
-            # If VIP match was found, ensure alert is triggered
             if vip_match:
                 eval_res.is_urgent = True
                 if not eval_res.reason or eval_res.reason == "General":
@@ -237,7 +242,7 @@ class GroqService:
             body = em.get("body", "") or em.get("snippet", "")
             emails_context.append(
                 f"[Email {idx}] From: {em.get('from')} | Date: {em.get('date')} | Subject: {em.get('subject')}\n"
-                f"Content: {body[:1500]}\n"
+                f"Content: {body[:1000]}\n"
             )
 
         prompt = (
@@ -261,6 +266,7 @@ class GroqService:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
+            max_tokens=500,
         )
         return (completion.choices[0].message.content or "").strip()
 
@@ -284,7 +290,7 @@ class GroqService:
             f"Original Email:\n"
             f"From: {email.get('from')}\n"
             f"Subject: {email.get('subject')}\n"
-            f"Body:\n{email.get('body', '')[:2000]}\n\n"
+            f"Body:\n{email.get('body', '')[:1500]}\n\n"
             f"{instruction_text}"
         )
 
@@ -296,6 +302,7 @@ class GroqService:
             ],
             temperature=0.4,
             response_format={"type": "json_object"},
+            max_tokens=500,
         )
 
         raw_draft = (completion.choices[0].message.content or "{}").strip()
