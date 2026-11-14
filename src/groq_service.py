@@ -1,4 +1,4 @@
-"""Groq AI service for ultra-fast email summarization, analysis, and reply drafting."""
+"""Groq AI service for ultra-fast email summarization, analysis, reply drafting, and urgency sensing."""
 
 import json
 import logging
@@ -34,6 +34,25 @@ class InboxDigest(BaseModel):
     )
     items: List[EmailSummaryItem] = Field(
         description="Structured breakdown of each processed email"
+    )
+
+
+class EmailUrgencyEvaluation(BaseModel):
+    is_urgent: bool = Field(
+        default=False,
+        description="True ONLY if this email requires immediate prompt attention (security codes/2FA, payment failure, strict deadlines within 24h, cancellations, or VIP requests)",
+    )
+    reason: str = Field(
+        default="General Notification",
+        description="Short category tag e.g. 'Security Verification', 'Payment Failure', 'Urgent Deadline', 'VIP Sender'",
+    )
+    tl_dr: str = Field(
+        default="",
+        description="1 punchy sentence explaining the situation",
+    )
+    action_required: str = Field(
+        default="",
+        description="Concrete action the user should take right now, if any",
     )
 
 
@@ -106,7 +125,6 @@ class GroqService:
             )
 
             raw_text = (completion.choices[0].message.content or "{}").strip()
-            # Strip markdown code fences if returned by model
             if raw_text.startswith("```json"):
                 raw_text = raw_text[7:]
             elif raw_text.startswith("```"):
@@ -120,6 +138,73 @@ class GroqService:
         except Exception as e:
             logger.error("Failed to generate structured digest from Groq: %s", e)
             return self._fallback_digest(emails)
+
+    def evaluate_email_urgency(self, email: Dict[str, Any], vip_match: Optional[str] = None) -> Optional[EmailUrgencyEvaluation]:
+        """Autonomously evaluate if an unread email warrants an immediate proactive alert."""
+        client = self.get_client()
+
+        body_snippet = (email.get("body", "") or email.get("snippet", ""))[:1200]
+        vip_context = f"NOTE: This sender or subject matched the user's VIP Watchlist keyword: '{vip_match}'." if vip_match else ""
+
+        system_prompt = (
+            "You are an executive Chief of Staff deciding whether an incoming email warrants sending an IMMEDIATE push notification. "
+            "Emails that warrant immediate alerts: security verification / 2FA codes, account lockouts, payment failures, strict same-day deadlines, emergencies, travel cancellations/flight delays, or VIP sender inquiries. "
+            "Emails that DO NOT warrant alerts: marketing promos, routine digests, social media updates, or newsletters. "
+            "Return JSON matching the schema:\n"
+            "{\n"
+            '  "is_urgent": true or false,\n'
+            '  "reason": "Security Alert | Payment Failure | Urgent Deadline | VIP Inquiry | General",\n'
+            '  "tl_dr": "1 punchy sentence explaining the email",\n'
+            '  "action_required": "Exact action the user must take, if any"\n'
+            "}"
+        )
+
+        user_content = (
+            f"{vip_context}\n"
+            f"From: {email.get('from')}\n"
+            f"Subject: {email.get('subject')}\n"
+            f"Date: {email.get('date')}\n"
+            f"Content:\n{body_snippet}"
+        )
+
+        try:
+            completion = client.chat.completions.create(
+                model=Config.GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            raw = (completion.choices[0].message.content or "{}").strip()
+            if raw.startswith("```json"):
+                raw = raw[7:]
+            elif raw.startswith("```"):
+                raw = raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+
+            data = json.loads(raw, strict=False)
+            eval_res = EmailUrgencyEvaluation(**data)
+
+            # If VIP match was found, ensure alert is triggered
+            if vip_match:
+                eval_res.is_urgent = True
+                if not eval_res.reason or eval_res.reason == "General":
+                    eval_res.reason = f"⭐ VIP Watchlist: {vip_match}"
+            return eval_res
+        except Exception as e:
+            logger.error("Failed to evaluate urgency for email %s: %s", email.get("id"), e)
+            if vip_match:
+                return EmailUrgencyEvaluation(
+                    is_urgent=True,
+                    reason=f"⭐ VIP Match ({vip_match})",
+                    tl_dr=email.get("snippet", "New message from VIP sender")[:100],
+                    action_required="Check email details",
+                )
+            return None
 
     def _fallback_digest(self, emails: List[Dict[str, Any]]) -> InboxDigest:
         """Fallback lightweight digest generator."""
