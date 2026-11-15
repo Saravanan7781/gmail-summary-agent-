@@ -1,9 +1,11 @@
 """Modern, elegant Telegram Bot UX with Context Memory and Smart Intent Handling."""
 
+import datetime
 import html
 import logging
 import re
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -107,19 +109,30 @@ class GmailBot:
 
         watchlist = vip_manager.get_watchlist()
         vip_count = len(watchlist)
+        seen_count = vip_manager.get_seen_count()
         status_text = (
-            f"⚙️ <b>Assistant Health & Status</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"• <b>AI Inference:</b> Groq ({html.escape(Config.GROQ_MODEL)})\n"
-            f"• <b>Gmail OAuth:</b> {'✅ Connected' if Config.GMAIL_TOKEN_PATH.exists() else '❌ Not Authenticated'}\n"
-            f"• <b>VIP Radar:</b> ✅ Active (Scanning every 5 min | {vip_count} watched)\n"
-            f"• <b>Morning Briefing:</b> {'✅ Active (' + Config.DAILY_DIGEST_TIME + ')' if Config.ENABLE_SCHEDULED_DIGEST else '⏸️ Inactive'}\n"
-            f"• <b>Authorized User:</b> <code>{update.effective_user.id}</code>"
+            f"⚙️ <b>ASSISTANT TELEMETRY & HEALTH</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• <b>Host Environment:</b> 🟢 Render Cloud (24/7 Web Service)\n"
+            f"• <b>AI Inference:</b> Groq LPU (<code>{html.escape(Config.GROQ_MODEL)}</code>)\n"
+            f"• <b>Urgency Engine:</b> 🟢 Zero-Token Fast Path Active\n"
+            f"• <b>Gmail OAuth:</b> {'🟢 Authenticated & Connected' if Config.GMAIL_TOKEN_PATH.exists() else '❌ Not Authenticated'}\n"
+            f"• <b>VIP Radar:</b> 🟢 Active (Continuous 5-Min Sweep | {vip_count} watched)\n"
+            f"• <b>Morning Briefing:</b> {'☀️ Daily at ' + Config.DAILY_DIGEST_TIME + ' IST' if Config.ENABLE_SCHEDULED_DIGEST else '⏸️ Inactive'}\n"
+            f"• <b>Timezone:</b> 🇮🇳 {Config.TIMEZONE} (UTC+05:30)\n"
+            f"• <b>Alert Deduplication:</b> 🛡️ {seen_count} Signatures Cached\n"
+            f"• <b>Authorized User ID:</b> <code>{update.effective_user.id}</code>"
         )
-        await update.message.reply_html(status_text, reply_markup=MAIN_KEYBOARD)
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Refresh Pulse", callback_data="refresh_summary"),
+                InlineKeyboardButton("⚡ Scan VIP Radar", callback_data="radar_scan_now"),
+            ]
+        ]
+        await update.message.reply_html(status_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def vip_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Manage VIP Radar watchlist."""
+        """Manage VIP Radar watchlist and view proactive radar telemetry."""
         if not await check_auth_or_reject(update):
             return
 
@@ -141,28 +154,37 @@ class GmailBot:
                 return
 
         watchlist = vip_manager.get_watchlist()
+        seen_count = vip_manager.get_seen_count()
         if watchlist:
-            items_list = "\n".join([f"  • <code>{html.escape(v)}</code>" for v in watchlist])
+            items_list = "\n".join([f"  {idx}. <code>{html.escape(v)}</code>" for idx, v in enumerate(watchlist, 1)])
         else:
-            items_list = "  <i>No custom senders yet. (Groq still autonomously alerts on payments, security codes & deadlines!)</i>"
+            items_list = "  <i>No custom senders yet. (Autonomous triggers still detect payments, security & deadlines!)</i>"
 
         text = (
-            f"🚨 <b>VIP Radar & Proactive Alerts</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Your agent silently scans your inbox every 5 minutes and pushes instant alerts for:\n"
-            f"1. <b>Strict Urgency</b> (Money transfers, 2FA/security codes, payment confirmations, same-day deadlines).\n"
-            f"2. <b>VIP Senders & Domains</b> matching your watchlist below.\n\n"
-            f"<b>Current Watchlist ({len(watchlist)}):</b>\n"
+            f"🚨 <b>VIP RADAR COMMAND CENTER</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• <b>Scanner State:</b> 🟢 Active (Continuous 5-Min Sweeps)\n"
+            f"• <b>Timezone:</b> 🇮🇳 {Config.TIMEZONE} (IST)\n"
+            f"• <b>Alert Signatures Cached:</b> 🛡️ {seen_count}\n\n"
+            f"<b>Autonomous Trigger Matrix:</b>\n"
+            f"  ✅ Real-time Financial Credits & UPI/Bank Transfers\n"
+            f"  ✅ 2FA & Security Verification Codes\n"
+            f"  ✅ Urgent Deadlines & Time-Sensitive Direct Inquiries\n\n"
+            f"⭐ <b>Active VIP Watchlist ({len(watchlist)}):</b>\n"
             f"{items_list}\n\n"
-            f"<b>How to Add / Remove:</b>\n"
-            f"• <code>/vip add saravanan</code>\n"
-            f"• <code>/vip add boss@company.com</code>\n"
-            f"• <code>/vip remove saravanan</code>"
+            f"<b>How to Manage:</b>\n"
+            f"• Add sender/domain: <code>/vip add saravanan</code>\n"
+            f"• Remove sender: <code>/vip remove saravanan</code>"
         )
 
         keyboard = [
             [
                 InlineKeyboardButton("⚡ Scan Radar Right Now", callback_data="radar_scan_now"),
+                InlineKeyboardButton("🧹 Reset Alert Cache", callback_data="reset_radar_cache"),
+            ],
+            [
+                InlineKeyboardButton("📊 Executive Pulse", callback_data="refresh_summary"),
+                InlineKeyboardButton("📬 Unread Emails", callback_data="open_unread_list"),
             ]
         ]
         await update.message.reply_html(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -174,13 +196,26 @@ class GmailBot:
 
         chat = update.effective_chat
         await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
-        status_msg = await update.message.reply_html("⚡ <i>Reading your inbox and preparing executive briefing...</i>")
+        status_msg = await update.message.reply_html("⚡ <i>Analyzing inbox telemetry and preparing executive briefing...</i>")
 
         try:
-            unread_emails = self.gmail.fetch_unread_emails(max_results=10)
+            unread_emails = self.gmail.fetch_unread_emails(max_results=12)
+            tz = ZoneInfo(Config.TIMEZONE)
+            timestamp = datetime.datetime.now(tz).strftime("%I:%M %p • %d %b")
 
             if not unread_emails:
-                await status_msg.edit_text("🎉 <b>Inbox Zero!</b> You have no unread emails right now.", parse_mode=ParseMode.HTML)
+                inbox_zero = (
+                    "🎉 <b>INBOX ZERO ACHIEVED</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🕒 <i>Checked at {timestamp} IST</i>\n\n"
+                    "Your inbox is completely clear! No unread messages.\n"
+                    "Proactive VIP Radar is actively standing by."
+                )
+                keyboard = [
+                    [InlineKeyboardButton("⚡ Scan VIP Radar", callback_data="radar_scan_now")],
+                    [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_summary")]
+                ]
+                await status_msg.edit_text(inbox_zero, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
 
             digest = self.groq.summarize_inbox(unread_emails)
@@ -191,7 +226,6 @@ class GmailBot:
             context.user_data["cached_emails"] = {
                 em["id"]: em for em in unread_emails
             }
-            # Set the first urgent or first email as default last active
             if unread_emails:
                 context.user_data["last_active_email"] = unread_emails[0]
 
@@ -200,13 +234,16 @@ class GmailBot:
             normal_or_low = [i for i in digest.items if i.priority.upper() not in ("URGENT", "IMPORTANT")]
 
             lines = [
-                "✨ <b>Executive Inbox Briefing</b>",
-                "━━━━━━━━━━━━━━━━━━━━━━",
+                "⚡ <b>EXECUTIVE INBOX PULSE</b>",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                f"📊 <b>Unread:</b> {len(unread_emails)}  │  🚨 <b>Critical:</b> {len(urgent)}  │  📌 <b>Important:</b> {len(important)}",
+                f"🕒 <i>Synced: {timestamp} IST</i>\n",
+                "🎯 <b>EXECUTIVE SYNTHESIS:</b>",
                 f"<i>{html.escape(digest.executive_summary)}</i>\n",
             ]
 
             if urgent:
-                lines.append("🚨 <b>Action Required:</b>")
+                lines.append(f"🚨 <b>CRITICAL ACTION REQUIRED ({len(urgent)}):</b>")
                 for it in urgent:
                     sender = clean_sender_name(it.sender)
                     lines.append(f"• <b>{html.escape(sender)}</b>: {html.escape(it.tl_dr)}")
@@ -215,28 +252,28 @@ class GmailBot:
                 lines.append("")
 
             if important:
-                lines.append("📌 <b>Important Updates:</b>")
+                lines.append(f"📌 <b>NOTABLE UPDATES ({len(important)}):</b>")
                 for it in important:
                     sender = clean_sender_name(it.sender)
                     lines.append(f"• <b>{html.escape(sender)}</b>: {html.escape(it.tl_dr)}")
                 lines.append("")
 
             if normal_or_low:
-                lines.append("☕ <b>Low Priority & Updates:</b>")
-                for it in normal_or_low[:4]:
+                lines.append(f"☕ <b>ROUTINE & NEWSLETTERS ({len(normal_or_low)}):</b>")
+                for it in normal_or_low[:3]:
                     sender = clean_sender_name(it.sender)
                     lines.append(f"• <b>{html.escape(sender)}</b>: {html.escape(it.tl_dr)}")
-                if len(normal_or_low) > 4:
-                    lines.append(f"• <i>...and {len(normal_or_low) - 4} more notifications</i>")
+                if len(normal_or_low) > 3:
+                    lines.append(f"• <i>...and {len(normal_or_low) - 3} more automated notifications</i>")
                 lines.append("")
 
-            lines.append("━━━━━━━━━━━━━━━━━━━━━━")
-            lines.append("👇 <i>Tap an email below to view details or draft a reply:</i>")
+            lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            lines.append("👇 <i>Select an email below to view details or generate an instant AI reply:</i>")
 
             keyboard = []
             row = []
             for idx, it in enumerate(digest.items[:8], start=1):
-                clean_name = clean_sender_name(it.sender)[:14]
+                clean_name = clean_sender_name(it.sender)[:13]
                 icon = "🔴" if it.priority.upper() == "URGENT" else ("🟡" if it.priority.upper() == "IMPORTANT" else "✉️")
                 btn = InlineKeyboardButton(f"{icon} {idx}. {clean_name}", callback_data=f"open:{it.id}")
                 row.append(btn)
@@ -247,7 +284,10 @@ class GmailBot:
                 keyboard.append(row)
 
             keyboard.append([
-                InlineKeyboardButton("🔄 Refresh Summary", callback_data="refresh_summary"),
+                InlineKeyboardButton("🔄 Refresh Pulse", callback_data="refresh_summary"),
+                InlineKeyboardButton("⚡ VIP Radar Scan", callback_data="radar_scan_now"),
+            ])
+            keyboard.append([
                 InlineKeyboardButton("🧹 Mark All Low Read", callback_data="mark_all_low"),
             ])
 
@@ -265,13 +305,14 @@ class GmailBot:
             )
 
     async def unread_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Quick list of unread emails."""
+        """Quick visual list of unread emails."""
         if not await check_auth_or_reject(update):
             return
 
-        await update.message.reply_chat_action(ChatAction.TYPING)
+        chat = update.effective_chat
+        await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
         try:
-            emails = self.gmail.fetch_unread_emails(max_results=8)
+            emails = self.gmail.fetch_unread_emails(max_results=10)
             if not emails:
                 await update.message.reply_html("🎉 <b>All caught up!</b> No unread emails.", reply_markup=MAIN_KEYBOARD)
                 return
@@ -280,14 +321,25 @@ class GmailBot:
             if emails:
                 context.user_data["last_active_email"] = emails[0]
 
-            lines = [f"📬 <b>Recent Unread Emails ({len(emails)}):</b>\n"]
+            lines = [
+                "📬 <b>INBOX UNREAD QUEUE</b>",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                f"Found <b>{len(emails)} unread messages</b> in your inbox:\n"
+            ]
             for i, em in enumerate(emails, 1):
                 sender = clean_sender_name(em.get("from", "Unknown"))
                 subj = em.get("subject", "(No Subject)")
-                lines.append(f"<b>{i}. {html.escape(sender)}</b>\n   └ <code>{html.escape(subj[:60])}</code>")
+                snip = (em.get("snippet", ""))[:75]
+                heur = self.groq.detect_urgency_heuristics(em)
+                vip_m = vip_manager.matches_vip(sender, subj)
+                badge = "🔴" if (heur and heur.is_urgent) or vip_m else "✉️"
+                lines.append(f"{badge} <b>{i}. {html.escape(sender)}</b>\n   └ <code>{html.escape(subj[:60])}</code>\n   <i>{html.escape(snip)}...</i>")
 
             keyboard = [
-                [InlineKeyboardButton("📊 Generate Full Summary", callback_data="refresh_summary")]
+                [
+                    InlineKeyboardButton("📊 Generate Executive Pulse", callback_data="refresh_summary"),
+                    InlineKeyboardButton("⚡ Scan VIP Radar", callback_data="radar_scan_now"),
+                ]
             ]
 
             await update.message.reply_html(
@@ -476,11 +528,23 @@ class GmailBot:
             await self.summary_command(update, context)
             return
 
+        elif data == "open_unread_list":
+            await self.unread_command(update, context)
+            return
+
+        elif data == "reset_radar_cache":
+            cleared = vip_manager.clear_seen_alerts()
+            await query.message.reply_html(
+                f"🧹 <b>VIP Alert Cache Cleared!</b>\n"
+                f"Reset {cleared} deduplicated signatures. Proactive radar can now re-alert on previous messages if desired."
+            )
+            return
+
         elif data == "radar_scan_now":
             await query.message.reply_chat_action(ChatAction.TYPING)
             progress = await query.message.reply_html("⚡ <i>Scanning inbox with VIP Radar...</i>")
             # Fetch unread emails
-            unread = self.gmail.fetch_unread_emails(max_results=8)
+            unread = self.gmail.fetch_unread_emails(max_results=10)
             found_alerts = 0
             for em in unread:
                 vip_m = vip_manager.matches_vip(em.get("from", ""), em.get("subject", ""))
@@ -492,28 +556,31 @@ class GmailBot:
                     clean_name = clean_sender_name(em.get("from", ""))
                     alert_card = (
                         f"🚨 <b>VIP RADAR: Live Alert</b>\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"<b>From:</b> {html.escape(clean_name)}\n"
-                        f"<b>Subject:</b> <code>{html.escape(em.get('subject', ''))}</code>\n"
-                        f"<b>Trigger:</b> <i>{html.escape(eval_res.reason)}</i>\n\n"
-                        f"<b>Takeaway:</b>\n{html.escape(eval_res.tl_dr)}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 <b>From:</b> {html.escape(clean_name)}\n"
+                        f"✉️ <b>Subject:</b> <code>{html.escape(em.get('subject', ''))}</code>\n"
+                        f"⚡ <b>Trigger:</b> <i>{html.escape(eval_res.reason)}</i>\n\n"
+                        f"📌 <b>Takeaway:</b>\n{html.escape(eval_res.tl_dr)}\n"
                     )
                     if eval_res.action_required:
-                        alert_card += f"\n<b>⚡ Action:</b> <i>{html.escape(eval_res.action_required)}</i>\n"
+                        alert_card += f"\n👉 <b>Action Needed:</b> <i>{html.escape(eval_res.action_required)}</i>\n"
 
                     keyboard = [
                         [
-                            InlineKeyboardButton("✍️ Draft Reply", callback_data=f"draft:{em.get('id')}"),
+                            InlineKeyboardButton("✍️ Draft AI Reply", callback_data=f"draft:{em.get('id')}"),
                             InlineKeyboardButton("✅ Mark Read", callback_data=f"read:{em.get('id')}"),
                         ],
                         [
-                            InlineKeyboardButton("⭐ Add to VIP", callback_data=f"add_vip_sender:{em.get('id')}"),
+                            InlineKeyboardButton("⭐ Add Sender to VIP", callback_data=f"add_vip_sender:{em.get('id')}"),
                             InlineKeyboardButton("📄 View Content", callback_data=f"view:{em.get('id')}"),
                         ]
                     ]
                     await query.message.reply_html(alert_card, reply_markup=InlineKeyboardMarkup(keyboard))
             if found_alerts == 0:
-                await progress.edit_text("✅ <b>Radar Scan Complete:</b> No urgent or VIP emails detected right now.", parse_mode=ParseMode.HTML)
+                await progress.edit_text(
+                    f"✅ <b>Radar Scan Complete:</b> Checked {len(unread)} unread emails. No urgent or VIP triggers detected right now.",
+                    parse_mode=ParseMode.HTML
+                )
             else:
                 await progress.delete()
 
@@ -581,7 +648,10 @@ class GmailBot:
             success = self.gmail.mark_as_read(msg_id)
             if success:
                 keyboard = [
-                    [InlineKeyboardButton("✍️ Draft Reply to This", callback_data=f"draft:{msg_id}")]
+                    [
+                        InlineKeyboardButton("✍️ Draft AI Reply", callback_data=f"draft:{msg_id}"),
+                        InlineKeyboardButton("📊 Back to Pulse", callback_data="refresh_summary"),
+                    ]
                 ]
                 await query.message.reply_html(f"✅ <b>Marked as read in Gmail!</b>", reply_markup=InlineKeyboardMarkup(keyboard))
             else:

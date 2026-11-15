@@ -51,6 +51,7 @@ class Config:
         os.getenv("ENABLE_SCHEDULED_DIGEST", "false").lower() in ("true", "1", "yes")
     )
     DAILY_DIGEST_TIME: str = os.getenv("DAILY_DIGEST_TIME", "08:30").strip()
+    TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Kolkata").strip()
     _raw_digest_chat = os.getenv("DIGEST_CHAT_ID", "").strip()
     DIGEST_CHAT_ID: int | None = (
         int(_raw_digest_chat) if _raw_digest_chat.lstrip("-").isdigit() else None

@@ -52,6 +52,13 @@ class VIPManager:
             except Exception as e:
                 logger.warning("Error reading seen_alerts.json: %s", e)
 
+        # 4. Seed default VIP watchlist targets if empty
+        if not self._watchlist:
+            default_seeds = ["saravanan", "bitsathy.ac.in"]
+            for seed in default_seeds:
+                self._watchlist.add(seed)
+            self._save_watchlist()
+
     def _save_watchlist(self) -> None:
         """Persist watchlist to disk."""
         try:
@@ -112,6 +119,17 @@ class VIPManager:
         """Mark a message ID as alerted."""
         self._seen_alert_ids.add(msg_id)
         self._save_seen_alerts()
+
+    def clear_seen_alerts(self) -> int:
+        """Clear the seen alerts cache (useful for testing or resetting radar)."""
+        count = len(self._seen_alert_ids)
+        self._seen_alert_ids.clear()
+        self._save_seen_alerts()
+        return count
+
+    def get_seen_count(self) -> int:
+        """Return the number of cached alert IDs."""
+        return len(self._seen_alert_ids)
 
 
 # Global singleton instance

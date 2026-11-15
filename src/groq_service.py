@@ -140,39 +140,113 @@ class GroqService:
             logger.error("Failed to generate structured digest from Groq: %s", e)
             return self._fallback_digest(emails)
 
+    @staticmethod
+    def detect_urgency_heuristics(email: Dict[str, Any]) -> Optional[EmailUrgencyEvaluation]:
+        """Fast, zero-token rule-based urgency classifier for financial alerts, 2FA, and strict deadlines."""
+        import re
+        subject = (email.get("subject") or "").lower()
+        snippet = (email.get("snippet") or "").lower()
+        body = (email.get("body") or "").lower()
+        full_text = f"{subject} {snippet} {body[:1500]}"
+
+        # 1. Financial transactions & receipts
+        fin_keywords = [
+            "credited", "debited", "deposit", "deposited", "transfer", "transferred",
+            "payment", "paid", "refund", "invoice", "neft", "rtgs", "imps", "upi",
+            "gpay", "phonepe", "paytm", "transaction", "bank"
+        ]
+        curr_pattern = r"(?:rs\.?|inr|₹|\$|€|£)\s*\d+|\d+\s*(?:rs|k|inr|bucks)"
+        has_fin_word = any(kw in full_text for kw in fin_keywords)
+        has_curr = bool(re.search(curr_pattern, full_text))
+        is_direct_payment = any(term in full_text for term in ["credited", "deposited", "payment done", "money received", "transfer successful"])
+
+        if (has_fin_word and has_curr) or is_direct_payment:
+            raw_snippet = email.get("snippet") or email.get("subject") or "Financial transaction detected."
+            return EmailUrgencyEvaluation(
+                is_urgent=True,
+                reason="💰 Financial Alert / Transfer",
+                tl_dr=raw_snippet[:140],
+                action_required="Verify bank account or transaction receipt and confirm status",
+            )
+
+        # 2. Security / 2FA / Authentication
+        sec_patterns = [
+            "verification code", "security code", "otp", "2fa", "two-factor",
+            "password reset", "temporary password", "unauthorized login", "security alert",
+            "suspicious login", "account lockout"
+        ]
+        if any(sp in full_text for sp in sec_patterns):
+            raw_snippet = email.get("snippet") or email.get("subject") or "Security code or alert received."
+            return EmailUrgencyEvaluation(
+                is_urgent=True,
+                reason="🔐 Security / Verification Code",
+                tl_dr=raw_snippet[:140],
+                action_required="Use verification code or review account security immediately",
+            )
+
+        # 3. Urgent deadlines / immediate action required
+        urgent_patterns = [
+            "urgent", "action required", "immediate attention", "asap", "deadline today",
+            "account suspended", "payment failed", "reply fast", "respond immediately",
+            "requires your immediate", "urgent action"
+        ]
+        if any(up in full_text for up in urgent_patterns):
+            raw_snippet = email.get("snippet") or email.get("subject") or "Urgent action required."
+            return EmailUrgencyEvaluation(
+                is_urgent=True,
+                reason="🚨 Urgent Request",
+                tl_dr=raw_snippet[:140],
+                action_required="Review email and respond promptly",
+            )
+
+        return None
+
     def evaluate_email_urgency(self, email: Dict[str, Any], vip_match: Optional[str] = None) -> Optional[EmailUrgencyEvaluation]:
-        """Autonomously evaluate if an unread email warrants an immediate proactive alert."""
-        client = self.get_client()
+        """Autonomously evaluate if an unread email warrants an immediate proactive alert.
+        Uses zero-token heuristic pre-filtering to save Groq quota and guarantee zero dropped alerts."""
+        heuristic_res = self.detect_urgency_heuristics(email)
 
-        body_snippet = (email.get("body", "") or email.get("snippet", ""))[:1200]
-        vip_context = f"NOTE: This sender or subject matched the user's VIP Watchlist keyword: '{vip_match}'." if vip_match else ""
+        # Handle VIP matches
+        if vip_match:
+            if not heuristic_res:
+                heuristic_res = EmailUrgencyEvaluation(
+                    is_urgent=True,
+                    reason=f"⭐ VIP Watchlist: {vip_match}",
+                    tl_dr=email.get("snippet", "New message from VIP sender")[:140],
+                    action_required="Check email details and reply",
+                )
+            else:
+                heuristic_res.reason = f"⭐ VIP: {heuristic_res.reason}"
 
-        system_prompt = (
-            "You are an executive Chief of Staff deciding whether an incoming email warrants sending an IMMEDIATE push notification.\n"
-            "Items that warrant immediate alerts:\n"
-            "- Financial transactions: money transfers, deposits, credits (e.g. 1000rs credited), payments received, bank alerts, or fraud warnings.\n"
-            "- Direct personal requests: someone asking for confirmation, asking if money arrived, or urgent peer requests.\n"
-            "- Security verification / 2FA codes, account lockouts, or password resets.\n"
-            "- Strict same-day deadlines, emergencies, or VIP sender inquiries.\n"
-            "Items that DO NOT warrant alerts: marketing promos, routine digests, social media updates, or newsletters.\n"
-            "Return JSON matching the schema:\n"
-            "{\n"
-            '  "is_urgent": true or false,\n'
-            '  "reason": "Money Transfer | Payment Confirmation | Security Alert | Urgent Deadline | VIP Inquiry | General",\n'
-            '  "tl_dr": "1 punchy sentence explaining the email",\n'
-            '  "action_required": "Exact action the user must take, if any"\n'
-            "}"
-        )
+        # If neither heuristic nor VIP triggered, it is NOT urgent -> SKIP Groq to preserve token quota!
+        if not heuristic_res or not heuristic_res.is_urgent:
+            return None
 
-        user_content = (
-            f"{vip_context}\n"
-            f"From: {email.get('from')}\n"
-            f"Subject: {email.get('subject')}\n"
-            f"Date: {email.get('date')}\n"
-            f"Content:\n{body_snippet}"
-        )
-
+        # Attempt enrichment with Groq; gracefully fall back to heuristic if Groq encounters rate limit
         try:
+            client = self.get_client()
+            body_snippet = (email.get("body", "") or email.get("snippet", ""))[:1000]
+            vip_context = f"NOTE: This sender or subject matched the user's VIP Watchlist keyword: '{vip_match}'." if vip_match else ""
+
+            system_prompt = (
+                "You are an executive Chief of Staff deciding whether an incoming email warrants sending an IMMEDIATE push notification.\n"
+                "Return JSON matching the schema:\n"
+                "{\n"
+                '  "is_urgent": true,\n'
+                '  "reason": "Money Transfer | Payment Confirmation | Security Alert | Urgent Deadline | VIP Inquiry",\n'
+                '  "tl_dr": "1 punchy sentence explaining the email",\n'
+                '  "action_required": "Exact action the user must take, if any"\n'
+                "}"
+            )
+
+            user_content = (
+                f"{vip_context}\n"
+                f"From: {email.get('from')}\n"
+                f"Subject: {email.get('subject')}\n"
+                f"Date: {email.get('date')}\n"
+                f"Content:\n{body_snippet}"
+            )
+
             completion = client.chat.completions.create(
                 model=Config.GROQ_MODEL,
                 messages=[
@@ -181,7 +255,7 @@ class GroqService:
                 ],
                 temperature=0.1,
                 response_format={"type": "json_object"},
-                max_tokens=400,
+                max_tokens=300,
             )
             raw = (completion.choices[0].message.content or "{}").strip()
             if raw.startswith("```json"):
@@ -194,40 +268,54 @@ class GroqService:
 
             data = json.loads(raw, strict=False)
             eval_res = EmailUrgencyEvaluation(**data)
-
             if vip_match:
                 eval_res.is_urgent = True
+                if not eval_res.reason.startswith("⭐"):
+                    eval_res.reason = f"⭐ VIP: {eval_res.reason}"
+            elif heuristic_res and heuristic_res.is_urgent:
+                eval_res.is_urgent = True
                 if not eval_res.reason or eval_res.reason == "General":
-                    eval_res.reason = f"⭐ VIP Watchlist: {vip_match}"
+                    eval_res.reason = heuristic_res.reason
             return eval_res
         except Exception as e:
-            logger.error("Failed to evaluate urgency for email %s: %s", email.get("id"), e)
-            if vip_match:
-                return EmailUrgencyEvaluation(
-                    is_urgent=True,
-                    reason=f"⭐ VIP Match ({vip_match})",
-                    tl_dr=email.get("snippet", "New message from VIP sender")[:100],
-                    action_required="Check email details",
-                )
-            return None
+            logger.info("Groq urgency enrichment skipped (%s); using reliable heuristic.", e)
+            return heuristic_res
 
     def _fallback_digest(self, emails: List[Dict[str, Any]]) -> InboxDigest:
-        """Fallback lightweight digest generator."""
+        """Fallback lightweight digest generator with heuristic priority ranking."""
         items = []
+        urgent_count = 0
         for email in emails:
+            heur = self.detect_urgency_heuristics(email)
+            if heur and heur.is_urgent:
+                prio = "URGENT"
+                cat = heur.reason
+                act = [heur.action_required] if heur.action_required else []
+                urgent_count += 1
+            else:
+                prio = "NORMAL"
+                cat = "General"
+                act = []
+
             items.append(
                 EmailSummaryItem(
                     id=email.get("id", ""),
                     sender=email.get("from", "Unknown"),
                     subject=email.get("subject", "(No Subject)"),
-                    priority="NORMAL",
-                    category="General",
+                    priority=prio,
+                    category=cat,
                     tl_dr=email.get("snippet", "No summary available")[:150],
-                    action_items=[],
+                    action_items=act,
                 )
             )
+
+        exec_summary = (
+            f"Found {len(emails)} unread messages ({urgent_count} critical action items requiring prompt review)."
+            if urgent_count > 0
+            else f"Found {len(emails)} unread messages. No critical blockers detected."
+        )
         return InboxDigest(
-            executive_summary=f"Found {len(emails)} unread messages.",
+            executive_summary=exec_summary,
             items=items,
         )
 

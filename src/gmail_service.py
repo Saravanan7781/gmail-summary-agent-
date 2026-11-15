@@ -1,6 +1,7 @@
 """Gmail API integration service for authentication, fetching, searching, and managing emails."""
 
 import base64
+import html
 import json
 import logging
 from email.mime.text import MIMEText
@@ -135,13 +136,13 @@ class GmailService:
         headers = payload.get("headers", [])
 
         header_dict = {h["name"].lower(): h["value"] for h in headers if "name" in h and "value" in h}
-        subject = header_dict.get("subject", "(No Subject)")
-        sender = header_dict.get("from", "Unknown Sender")
-        date_str = header_dict.get("date", "")
-        message_id_header = header_dict.get("message-id", "")
+        subject = html.unescape(header_dict.get("subject", "(No Subject)").strip())
+        sender = html.unescape(header_dict.get("from", "Unknown Sender").strip())
+        date_str = header_dict.get("date", "").strip()
+        message_id_header = header_dict.get("message-id", "").strip()
 
-        body_text = self._extract_body(payload)
-        snippet = msg.get("snippet", "")
+        body_text = html.unescape(self._extract_body(payload))
+        snippet = html.unescape(msg.get("snippet", "").strip())
 
         return {
             "id": message_id,
